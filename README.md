@@ -197,6 +197,12 @@ without giving app containers mount authority:
 
 The privileged FUSE mount broker remains in the separate sidecar container.
 
+For BranchFS-backed agent protection, this sidecar is only the FUSE/mount
+plumbing layer. Branch/session creation, path-policy auto-commit, human review,
+and rollback/commit decisions should live in a separate trusted BranchFS agent
+supervisor. In the combined CCC/BranchFS workspace, see
+`../CCC_AGENT_BRANCHFS_PROTECTION_REVIEW_DESIGN.md` for that higher-level design.
+
 ### CCC base image contract
 
 CCC base images consume a published client image selected by:
@@ -277,28 +283,20 @@ Do not provide app-side:
 --privileged
 ```
 
-`ccc-inventory` maps `/dev/fuse` into compute containers by default:
-
-```yaml
-compute_container_fuse_enabled: True
-compute_container_fuse_device: /dev/fuse
-compute_container_fuse_device_permissions: rw
-compute_container_fuse_capabilities: []
-```
-
-A container can opt out when needed:
-
-```yaml
-my-container:
-  DISABLE_FUSE: true
-```
-
-If a site disables the global default, a specific container can opt back in with:
+`ccc-inventory` keeps FUSE sidecar support disabled by default so existing
+production containers are not recreated. A specific container opts in through its
+custom settings file:
 
 ```yaml
 my-container:
   ENABLE_FUSE: true
 ```
+
+When enabled, `ccc-inventory` starts a matching
+`vicoslab/ccc-fuse-sidecar` helper container, maps `/dev/fuse` plus
+`/run/ccc-fuse-sidecar` into the app container through the existing volume-mount
+list, and keeps the app container without `SYS_ADMIN` and without
+`--privileged`.
 
 ### CCC request flow
 
