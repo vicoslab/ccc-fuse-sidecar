@@ -1,0 +1,36 @@
+services:
+  ccc-fuse-sidecar:
+    image: vicoslab/ccc-fuse-sidecar:latest
+    command:
+      - --allow-prefix
+      - /mnt/ccc-fuse
+    devices:
+      - /dev/fuse:/dev/fuse:rw
+    cap_add:
+      - SYS_ADMIN
+    volumes:
+      - ccc-fuse-control:/run/ccc-fuse-sidecar
+      - type: bind
+        source: /tmp/ccc-fuse-mounts
+        target: /mnt/ccc-fuse
+        bind:
+          propagation: rshared
+
+  app:
+    image: your-ccc-app-with-fuse-shims:latest
+    environment:
+      CCC_FUSE_SIDECAR_SOCKET: /run/ccc-fuse-sidecar/fuse.sock
+    devices:
+      - /dev/fuse:/dev/fuse:rw
+    volumes:
+      - ccc-fuse-control:/run/ccc-fuse-sidecar
+      - type: bind
+        source: /tmp/ccc-fuse-mounts
+        target: /mnt/ccc-fuse
+        bind:
+          propagation: rshared
+    depends_on:
+      - ccc-fuse-sidecar
+
+volumes:
+  ccc-fuse-control:

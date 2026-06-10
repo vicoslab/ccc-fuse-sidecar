@@ -1,0 +1,12 @@
+CCC FUSE Sidecar
+
+This project includes fd-passing code derived from:
+
+  meta-fuse-csi-plugin
+  https://github.com/pfnet-research/meta-fuse-csi-plugin
+
+The derived code retains the Apache-2.0 copyright attribution from:
+
+  Copyright 2018 The Kubernetes Authors.
+  Copyright 2022 Google LLC
+  Copyright 2023 Preferred Networks, Inc.
