@@ -67,7 +67,7 @@ services:
         test "$(readlink -f /usr/bin/fusermount3)" = /opt/ccc-fuse-sidecar/bin/fusermount3
 
         archivemount /tmp/test.tar "$$mountpoint"
-        test "$$(cat "$${mountpoint}/hello.txt")" = hello
+        ls $${mountpoint}
+        test "$$(cat "$${mountpoint}/hello.txt")" = hello && echo "ccc-fuse-sidecar docker archivemount test passed"
         fusermount3 -u -z "$$mountpoint"
-        echo "ccc-fuse-sidecar docker archivemount test passed"
       '
