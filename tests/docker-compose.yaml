@@ -45,31 +45,10 @@ services:
         target: /mnt/ccc-fuse
         bind:
           propagation: rshared
-    command: >
-      bash -lc '
-        set -euxo pipefail
-        mountpoint=/mnt/ccc-fuse/rar
-        cleanup() {
-          fusermount3 -u -z "$$mountpoint" >/dev/null 2>&1 || true
-        }
-        trap cleanup EXIT
-
-        for i in $(seq 1 100); do
-          test -S /run/ccc-fuse-sidecar/fuse.sock && break
-          sleep 0.1
-        done
-        test -S /run/ccc-fuse-sidecar/fuse.sock
-
-        mkdir -p "$$mountpoint"
-        test -e /dev/fuse
-        command -v archivemount
-        command -v fusermount3
-        test "$(readlink -f /usr/bin/fusermount3)" = /opt/ccc-fuse-sidecar/bin/fusermount3
-
-        archivemount /tmp/test.tar "$$mountpoint"
-        ls $${mountpoint}
-        test "$$(cat "$${mountpoint}/hello.txt")" = hello
-        fusermount3 -u -z "$$mountpoint"
-        trap - EXIT
-        echo "ccc-fuse-sidecar docker archivemount test passed"
-      '
+      - type: bind
+        source: ./smoke-archivemount.sh
+        target: /usr/local/bin/ccc-fuse-smoke-archivemount
+        read_only: true
+    command:
+      - bash
+      - /usr/local/bin/ccc-fuse-smoke-archivemount
