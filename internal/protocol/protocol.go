@@ -21,6 +21,9 @@ const (
 	EnvFuseCommFD        = "_FUSE_COMMFD"
 	EnvContainerName     = "CONTAINER_NAME"
 	EnvHostname          = "HOSTNAME"
+	// Set by the CCC agent supervisor (ccc-agent-run) for every process in a
+	// contained agent session; forwarded for audit logging only.
+	EnvAgentSession = "CCC_AGENT_SESSION"
 
 	ActionMount   = "mount"
 	ActionUnmount = "unmount"
@@ -33,6 +36,10 @@ type Request struct {
 	Lazy            bool     `json:"lazy,omitempty"`
 	ContainerName   string   `json:"container_name,omitempty"`
 	ContainerIDHint string   `json:"container_id_hint,omitempty"`
+	// SessionID is an opaque audit hint correlating this mount with a CCC
+	// agent branch session. The sidecar logs it; it carries no authority
+	// and is never used for authorization or path decisions.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 type Response struct {

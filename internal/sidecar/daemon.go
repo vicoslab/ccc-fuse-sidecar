@@ -163,7 +163,7 @@ func (d *Daemon) handleConn(conn net.Conn) {
 		d.writeError(conn, fmt.Sprintf("read request: %v", err))
 		return
 	}
-	d.debugf("request action=%q mountpoint=%q options=%v lazy=%v container=%q idHint=%q", req.Action, req.Mountpoint, req.Options, req.Lazy, req.ContainerName, req.ContainerIDHint)
+	d.debugf("request action=%q mountpoint=%q options=%v lazy=%v container=%q idHint=%q session=%q", req.Action, req.Mountpoint, req.Options, req.Lazy, req.ContainerName, req.ContainerIDHint, req.SessionID)
 
 	switch req.Action {
 	case protocol.ActionMount:
@@ -219,9 +219,9 @@ func (d *Daemon) handleMount(conn *net.UnixConn, req protocol.Request) {
 		return
 	}
 	if resolved.Translation != nil {
-		d.log.Printf("mounted client=%s sidecar=%s host=%s container=%s id=%s and sent FUSE fd to uid=%d gid=%d", resolved.ClientPath, resolved.SidecarPath, resolved.Translation.HostPath, resolved.Translation.ContainerName, resolved.Translation.ContainerID, uid, gid)
+		d.log.Printf("mounted client=%s sidecar=%s host=%s container=%s id=%s%s and sent FUSE fd to uid=%d gid=%d", resolved.ClientPath, resolved.SidecarPath, resolved.Translation.HostPath, resolved.Translation.ContainerName, resolved.Translation.ContainerID, sessionSuffix(req), uid, gid)
 	} else {
-		d.log.Printf("mounted %s and sent FUSE fd to uid=%d gid=%d", resolved.ClientPath, uid, gid)
+		d.log.Printf("mounted %s%s and sent FUSE fd to uid=%d gid=%d", resolved.ClientPath, sessionSuffix(req), uid, gid)
 	}
 }
 
@@ -249,10 +249,20 @@ func (d *Daemon) handleUnmount(conn net.Conn, req protocol.Request) {
 		d.log.Printf("failed to write unmount response for %s: %v", mountpoint, err)
 	}
 	if resolved.Translation != nil {
-		d.log.Printf("unmounted client=%s sidecar=%s host=%s container=%s lazy=%v", resolved.ClientPath, resolved.SidecarPath, resolved.Translation.HostPath, resolved.Translation.ContainerName, req.Lazy)
+		d.log.Printf("unmounted client=%s sidecar=%s host=%s container=%s%s lazy=%v", resolved.ClientPath, resolved.SidecarPath, resolved.Translation.HostPath, resolved.Translation.ContainerName, sessionSuffix(req), req.Lazy)
 	} else {
-		d.log.Printf("unmounted %s lazy=%v", mountpoint, req.Lazy)
+		d.log.Printf("unmounted %s%s lazy=%v", mountpoint, sessionSuffix(req), req.Lazy)
 	}
+}
+
+// sessionSuffix renders the optional CCC agent session audit hint for log
+// lines. The session id is informational only: it never participates in
+// authorization or path resolution.
+func sessionSuffix(req protocol.Request) string {
+	if req.SessionID == "" {
+		return ""
+	}
+	return " session=" + req.SessionID
 }
 
 func (d *Daemon) resolveMountpoint(ctx context.Context, req protocol.Request) (ResolvedMountpoint, error) {

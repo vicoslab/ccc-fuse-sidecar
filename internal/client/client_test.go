@@ -40,7 +40,7 @@ func TestRunnerMountForwardsFDToFuseCommFD(t *testing.T) {
 			sidecarErr <- err
 			return
 		}
-		if req.Action != protocol.ActionMount || req.Mountpoint != mountpoint || req.ContainerName != "ccc-demo" || req.ContainerIDHint != "abc123" {
+		if req.Action != protocol.ActionMount || req.Mountpoint != mountpoint || req.ContainerName != "ccc-demo" || req.ContainerIDHint != "abc123" || req.SessionID != "agent-20260611-test" {
 			sidecarErr <- errUnexpectedRequest
 			return
 		}
@@ -69,6 +69,7 @@ func TestRunnerMountForwardsFDToFuseCommFD(t *testing.T) {
 		protocol.EnvFuseCommFD:    strconv.Itoa(fds[0]),
 		protocol.EnvContainerName: " ccc-demo ",
 		protocol.EnvHostname:      " abc123 ",
+		protocol.EnvAgentSession:  " agent-20260611-test ",
 	}
 	code := Runner{
 		Getenv: func(k string) string { return env[k] },
@@ -115,12 +116,12 @@ func TestRequestUnmount(t *testing.T) {
 		_ = json.NewEncoder(conn).Encode(protocol.Response{OK: true})
 	}()
 
-	err = requestUnmount(socketPath, Args{Mountpoint: "/mnt/demo", Lazy: true}, "ccc-demo", "abc123", nil, false)
+	err = requestUnmount(socketPath, Args{Mountpoint: "/mnt/demo", Lazy: true}, "ccc-demo", "abc123", "agent-20260611-test", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := <-reqc
-	if req.Action != protocol.ActionUnmount || req.Mountpoint != "/mnt/demo" || !req.Lazy || req.ContainerName != "ccc-demo" || req.ContainerIDHint != "abc123" {
+	if req.Action != protocol.ActionUnmount || req.Mountpoint != "/mnt/demo" || !req.Lazy || req.ContainerName != "ccc-demo" || req.ContainerIDHint != "abc123" || req.SessionID != "agent-20260611-test" {
 		t.Fatalf("unexpected request: %+v", req)
 	}
 }
@@ -157,10 +158,11 @@ func TestContainerIdentityFromEnvTrimsWhitespace(t *testing.T) {
 	env := map[string]string{
 		protocol.EnvContainerName: " ccc-demo\t",
 		protocol.EnvHostname:      "\nabc123 ",
+		protocol.EnvAgentSession:  " agent-xyz \n",
 	}
-	name, idHint := containerIdentityFromEnv(func(k string) string { return env[k] })
-	if name != "ccc-demo" || idHint != "abc123" {
-		t.Fatalf("identity = %q/%q, want ccc-demo/abc123", name, idHint)
+	name, idHint, session := containerIdentityFromEnv(func(k string) string { return env[k] })
+	if name != "ccc-demo" || idHint != "abc123" || session != "agent-xyz" {
+		t.Fatalf("identity = %q/%q/%q, want ccc-demo/abc123/agent-xyz", name, idHint, session)
 	}
 }
 

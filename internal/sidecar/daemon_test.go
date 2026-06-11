@@ -358,3 +358,72 @@ func (f fakeInspector) InspectContainer(ctx context.Context, name string) (Conta
 	}
 	return f.inspect, nil
 }
+
+func TestDaemonMountLogsAgentSession(t *testing.T) {
+	dir := t.TempDir()
+	mountpoint := filepath.Join(dir, "mnt")
+	if err := os.Mkdir(mountpoint, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeFusePath := filepath.Join(dir, "fake-fuse")
+	if err := os.WriteFile(fakeFusePath, []byte("fake-fuse"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var logBuf strings.Builder
+	daemon, err := New(Config{
+		SocketPath:      filepath.Join(dir, "fuse.sock"),
+		AllowedPrefixes: []string{dir},
+		DevFusePath:     fakeFusePath,
+		OpenFuse: func(path string) (*os.File, error) {
+			return os.OpenFile(path, os.O_RDONLY, 0)
+		},
+		Mount: func(source, target, fstype string, flags uintptr, data string) error {
+			return nil
+		},
+		Logger: log.New(&logBuf, "", 0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() { errc <- daemon.ListenAndServe(ctx) }()
+	waitForSocket(t, daemon.cfg.SocketPath)
+
+	conn, err := net.Dial("unix", daemon.cfg.SocketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	req := protocol.Request{
+		Action:     protocol.ActionMount,
+		Mountpoint: mountpoint,
+		Options:    []string{"fsname=branchfs"},
+		SessionID:  "agent-20260611T000000Z-cafe0123",
+	}
+	if err := protocol.WriteJSON(conn, req); err != nil {
+		t.Fatal(err)
+	}
+	fuseFD, payload, err := fdpass.RecvMaybeFD(conn.(*net.UnixConn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(fuseFD)
+	var resp protocol.Response
+	if err := json.Unmarshal(payload, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.OK {
+		t.Fatalf("response error: %s", resp.Error)
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logBuf.String(), "session=agent-20260611T000000Z-cafe0123") {
+		t.Fatalf("mount log missing session audit hint:\n%s", logBuf.String())
+	}
+}
