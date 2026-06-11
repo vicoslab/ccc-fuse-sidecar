@@ -40,7 +40,7 @@ func TestRunnerMountForwardsFDToFuseCommFD(t *testing.T) {
 			sidecarErr <- err
 			return
 		}
-		if req.Action != protocol.ActionMount || req.Mountpoint != mountpoint {
+		if req.Action != protocol.ActionMount || req.Mountpoint != mountpoint || req.ContainerName != "ccc-demo" || req.ContainerIDHint != "abc123" {
 			sidecarErr <- errUnexpectedRequest
 			return
 		}
@@ -65,8 +65,10 @@ func TestRunnerMountForwardsFDToFuseCommFD(t *testing.T) {
 	defer receiver.Close()
 
 	env := map[string]string{
-		protocol.EnvSocketPath: socketPath,
-		protocol.EnvFuseCommFD: strconv.Itoa(fds[0]),
+		protocol.EnvSocketPath:    socketPath,
+		protocol.EnvFuseCommFD:    strconv.Itoa(fds[0]),
+		protocol.EnvContainerName: " ccc-demo ",
+		protocol.EnvHostname:      " abc123 ",
 	}
 	code := Runner{
 		Getenv: func(k string) string { return env[k] },
@@ -113,12 +115,12 @@ func TestRequestUnmount(t *testing.T) {
 		_ = json.NewEncoder(conn).Encode(protocol.Response{OK: true})
 	}()
 
-	err = requestUnmount(socketPath, Args{Mountpoint: "/mnt/demo", Lazy: true}, nil, false)
+	err = requestUnmount(socketPath, Args{Mountpoint: "/mnt/demo", Lazy: true}, "ccc-demo", "abc123", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := <-reqc
-	if req.Action != protocol.ActionUnmount || req.Mountpoint != "/mnt/demo" || !req.Lazy {
+	if req.Action != protocol.ActionUnmount || req.Mountpoint != "/mnt/demo" || !req.Lazy || req.ContainerName != "ccc-demo" || req.ContainerIDHint != "abc123" {
 		t.Fatalf("unexpected request: %+v", req)
 	}
 }
@@ -131,9 +133,11 @@ func TestRunnerDebugLogsParsedMountRequest(t *testing.T) {
 	}
 	socketPath := filepath.Join(dir, "missing.sock")
 	env := map[string]string{
-		protocol.EnvSocketPath: socketPath,
-		protocol.EnvFuseCommFD: "7",
-		protocol.EnvDebug:      "1",
+		protocol.EnvSocketPath:    socketPath,
+		protocol.EnvFuseCommFD:    "7",
+		protocol.EnvDebug:         "1",
+		protocol.EnvContainerName: "ccc-demo",
+		protocol.EnvHostname:      "abc123",
 	}
 	var stderr strings.Builder
 	code := Runner{
@@ -144,8 +148,19 @@ func TestRunnerDebugLogsParsedMountRequest(t *testing.T) {
 		t.Fatalf("exit code = 0, want failure because sidecar socket is absent")
 	}
 	log := stderr.String()
-	if !strings.Contains(log, "ccc-fuse-debug:") || !strings.Contains(log, "mountpoint=\""+mountpoint+"\"") || !strings.Contains(log, "_FUSE_COMMFD=7") {
+	if !strings.Contains(log, "ccc-fuse-debug:") || !strings.Contains(log, "mountpoint=\""+mountpoint+"\"") || !strings.Contains(log, "_FUSE_COMMFD=7") || !strings.Contains(log, "container=ccc-demo") || !strings.Contains(log, "idHint=abc123") {
 		t.Fatalf("debug log missing expected details:\n%s", log)
+	}
+}
+
+func TestContainerIdentityFromEnvTrimsWhitespace(t *testing.T) {
+	env := map[string]string{
+		protocol.EnvContainerName: " ccc-demo\t",
+		protocol.EnvHostname:      "\nabc123 ",
+	}
+	name, idHint := containerIdentityFromEnv(func(k string) string { return env[k] })
+	if name != "ccc-demo" || idHint != "abc123" {
+		t.Fatalf("identity = %q/%q, want ccc-demo/abc123", name, idHint)
 	}
 }
 

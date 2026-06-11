@@ -60,16 +60,17 @@ func (r Runner) Run(argv []string) int {
 		return 2
 	}
 	debug := debugEnabled(getenv)
+	containerName, containerIDHint := containerIdentityFromEnv(getenv)
 
 	socketPath := protocol.SocketPathFromEnv(getenv)
 	if err := protocol.ValidateSocketPath(socketPath); err != nil {
 		printErr(stderr, args.Quiet, "%s: invalid %s: %v\n", argv[0], protocol.EnvSocketPath, err)
 		return 1
 	}
-	debugf(stderr, debug, "%s: action=%s socket=%s mountpoint=%q options=%q lazy=%v quiet=%v\n", argv[0], actionName(args), socketPath, args.Mountpoint, args.Options, args.Lazy, args.Quiet)
+	debugf(stderr, debug, "%s: action=%s socket=%s mountpoint=%q options=%q lazy=%v quiet=%v%s\n", argv[0], actionName(args), socketPath, args.Mountpoint, args.Options, args.Lazy, args.Quiet, formatIdentityDebug(containerName, containerIDHint))
 
 	if args.Unmount {
-		if err := requestUnmount(socketPath, args, stderr, debug); err != nil {
+		if err := requestUnmount(socketPath, args, containerName, containerIDHint, stderr, debug); err != nil {
 			printErr(stderr, args.Quiet, "%s: %v\n", argv[0], err)
 			return 1
 		}
@@ -82,16 +83,16 @@ func (r Runner) Run(argv []string) int {
 		return 1
 	}
 	debugf(stderr, debug, "%s: using %s=%d\n", argv[0], protocol.EnvFuseCommFD, commFD)
-	if err := requestMountAndForwardFD(socketPath, commFD, args, stderr, debug); err != nil {
+	if err := requestMountAndForwardFD(socketPath, commFD, args, containerName, containerIDHint, stderr, debug); err != nil {
 		printErr(stderr, args.Quiet, "%s: %v\n", argv[0], err)
 		return 1
 	}
 	return 0
 }
 
-func requestMountAndForwardFD(socketPath string, commFD int, args Args, debugOut io.Writer, debug bool) error {
-	debugf(debugOut, debug, "fusermount3: requesting mount for %q via %s\n", args.Mountpoint, socketPath)
-	fuseFD, err := RequestMount(socketPath, args)
+func requestMountAndForwardFD(socketPath string, commFD int, args Args, containerName, containerIDHint string, debugOut io.Writer, debug bool) error {
+	debugf(debugOut, debug, "fusermount3: requesting mount for %q via %s%s\n", args.Mountpoint, socketPath, formatIdentityDebug(containerName, containerIDHint))
+	fuseFD, err := RequestMount(socketPath, args, containerName, containerIDHint)
 	if err != nil {
 		return err
 	}
@@ -110,7 +111,7 @@ func requestMountAndForwardFD(socketPath string, commFD int, args Args, debugOut
 	return nil
 }
 
-func RequestMount(socketPath string, args Args) (int, error) {
+func RequestMount(socketPath string, args Args, containerName, containerIDHint string) (int, error) {
 	sidecarConn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		return -1, fmt.Errorf("connect to sidecar socket %q: %w", socketPath, err)
@@ -122,9 +123,11 @@ func RequestMount(socketPath string, args Args) (int, error) {
 	}
 
 	req := protocol.Request{
-		Action:     protocol.ActionMount,
-		Mountpoint: args.Mountpoint,
-		Options:    SplitMountOptions(args.Options),
+		Action:          protocol.ActionMount,
+		Mountpoint:      args.Mountpoint,
+		Options:         SplitMountOptions(args.Options),
+		ContainerName:   containerName,
+		ContainerIDHint: containerIDHint,
 	}
 	if err := protocol.WriteJSON(sidecarConn, req); err != nil {
 		return -1, fmt.Errorf("send mount request: %w", err)
@@ -153,8 +156,8 @@ func RequestMount(socketPath string, args Args) (int, error) {
 	return fuseFD, nil
 }
 
-func requestUnmount(socketPath string, args Args, debugOut io.Writer, debug bool) error {
-	debugf(debugOut, debug, "fusermount3: requesting unmount for %q lazy=%v via %s\n", args.Mountpoint, args.Lazy, socketPath)
+func requestUnmount(socketPath string, args Args, containerName, containerIDHint string, debugOut io.Writer, debug bool) error {
+	debugf(debugOut, debug, "fusermount3: requesting unmount for %q lazy=%v via %s%s\n", args.Mountpoint, args.Lazy, socketPath, formatIdentityDebug(containerName, containerIDHint))
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("connect to sidecar socket %q: %w", socketPath, err)
@@ -162,9 +165,11 @@ func requestUnmount(socketPath string, args Args, debugOut io.Writer, debug bool
 	defer conn.Close()
 
 	req := protocol.Request{
-		Action:     protocol.ActionUnmount,
-		Mountpoint: args.Mountpoint,
-		Lazy:       args.Lazy,
+		Action:          protocol.ActionUnmount,
+		Mountpoint:      args.Mountpoint,
+		Lazy:            args.Lazy,
+		ContainerName:   containerName,
+		ContainerIDHint: containerIDHint,
 	}
 	if err := protocol.WriteJSON(conn, req); err != nil {
 		return fmt.Errorf("send unmount request: %w", err)
@@ -178,6 +183,24 @@ func requestUnmount(socketPath string, args Args, debugOut io.Writer, debug bool
 	}
 	debugf(debugOut, debug, "fusermount3: sidecar unmounted %q lazy=%v\n", args.Mountpoint, args.Lazy)
 	return nil
+}
+
+func containerIdentityFromEnv(getenv func(string) string) (name, idHint string) {
+	return strings.TrimSpace(getenv(protocol.EnvContainerName)), strings.TrimSpace(getenv(protocol.EnvHostname))
+}
+
+func formatIdentityDebug(containerName, containerIDHint string) string {
+	var parts []string
+	if containerName != "" {
+		parts = append(parts, "container="+containerName)
+	}
+	if containerIDHint != "" {
+		parts = append(parts, "idHint="+containerIDHint)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " " + strings.Join(parts, " ")
 }
 
 func debugEnabled(getenv func(string) string) bool {
@@ -216,7 +239,9 @@ Environment:
   %[2]s   sidecar Unix socket (default %[3]s)
   %[4]s              libfuse communication fd for mount requests
   %[5]s           enable verbose helper debug logs when set to 1/true/yes
-`, name, protocol.EnvSocketPath, protocol.DefaultSocketPath, protocol.EnvFuseCommFD, protocol.EnvDebug)
+  %[6]s             optional Docker container name hint for sidecar translation
+  %[7]s                    optional container id hint
+`, name, protocol.EnvSocketPath, protocol.DefaultSocketPath, protocol.EnvFuseCommFD, protocol.EnvDebug, protocol.EnvContainerName, protocol.EnvHostname)
 }
 
 func printErr(w io.Writer, quiet bool, format string, args ...any) {

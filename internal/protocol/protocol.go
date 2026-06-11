@@ -13,21 +13,26 @@ import (
 )
 
 const (
-	DefaultSocketPath = "/run/ccc-fuse-sidecar/fuse.sock"
-	EnvSocketPath     = "CCC_FUSE_SIDECAR_SOCKET"
-	EnvAllowedPrefix  = "CCC_FUSE_ALLOWED_PREFIXES"
-	EnvDebug          = "CCC_FUSE_DEBUG"
-	EnvFuseCommFD     = "_FUSE_COMMFD"
+	DefaultSocketPath    = "/run/ccc-fuse-sidecar/fuse.sock"
+	EnvSocketPath        = "CCC_FUSE_SIDECAR_SOCKET"
+	EnvAllowedPrefix     = "CCC_FUSE_ALLOWED_PREFIXES"
+	EnvAllowedHostPrefix = "CCC_FUSE_ALLOWED_HOST_PREFIXES"
+	EnvDebug             = "CCC_FUSE_DEBUG"
+	EnvFuseCommFD        = "_FUSE_COMMFD"
+	EnvContainerName     = "CONTAINER_NAME"
+	EnvHostname          = "HOSTNAME"
 
 	ActionMount   = "mount"
 	ActionUnmount = "unmount"
 )
 
 type Request struct {
-	Action     string   `json:"action"`
-	Mountpoint string   `json:"mountpoint"`
-	Options    []string `json:"options,omitempty"`
-	Lazy       bool     `json:"lazy,omitempty"`
+	Action          string   `json:"action"`
+	Mountpoint      string   `json:"mountpoint"`
+	Options         []string `json:"options,omitempty"`
+	Lazy            bool     `json:"lazy,omitempty"`
+	ContainerName   string   `json:"container_name,omitempty"`
+	ContainerIDHint string   `json:"container_id_hint,omitempty"`
 }
 
 type Response struct {

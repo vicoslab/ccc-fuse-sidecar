@@ -104,6 +104,13 @@ and builds that exec a compiled-in path such as `/bin/fusermount3`.
 
 ## Daemon
 
+### Legacy Direct-Prefix Mode
+
+This is the default mode and preserves the original behavior. The app-visible
+mountpoint path is validated and used directly inside the sidecar mount
+namespace, so the sidecar and app containers must see the target tree at the
+same path.
+
 ```bash
 ccc-fuse-sidecar \
   --socket /run/ccc-fuse-sidecar/fuse.sock \
@@ -123,6 +130,50 @@ Environment and flags:
 The daemon rejects relative paths, socket paths too long for Linux `sockaddr_un`,
 mountpoints outside allowed prefixes, non-directory mountpoints, and symlink
 escapes out of the allowed tree.
+
+### Docker-Inspect Translation Mode
+
+Set `--docker-socket` to opt in. In this mode the client shim sends
+`CONTAINER_NAME` and `HOSTNAME` hints with each request. The sidecar inspects the
+claimed Docker container, finds the longest bind mount whose `Destination`
+contains the requested client path, translates that path through the bind
+mount's `Source`, maps the host path under `--host-root`, and then runs the same
+mountpoint validation on the translated sidecar path.
+
+```bash
+ccc-fuse-sidecar \
+  --socket /run/ccc-fuse-sidecar/fuse.sock \
+  --docker-socket /var/run/docker.sock \
+  --host-root /host \
+  --allow-client-prefix /storage/user \
+  --allow-host-prefix /storage \
+  --require-container-label ccc.fuse=enabled
+```
+
+Additional flags and environment:
+
+- `--docker-socket`: Docker Engine Unix socket. Accepts `/var/run/docker.sock`
+  or `unix:///var/run/docker.sock`. Translation mode is enabled when this is
+  set.
+- `--host-root`: sidecar-visible root where host paths are mounted, for example
+  `/host`.
+- `--allow-client-prefix`: client-visible path prefix accepted from app
+  containers. May be repeated. `/` is rejected.
+- `--allow-host-prefix`: host path prefix accepted after Docker bind-mount
+  translation. May be repeated. `/` is rejected.
+- `CCC_FUSE_ALLOWED_HOST_PREFIXES`: colon- or comma-separated fallback for
+  `--allow-host-prefix`.
+- `--require-container-label key=value`: optional label requirement on the
+  inspected container. May be repeated.
+
+Translation mode supports only Docker bind mounts in this pass. Docker volumes
+and tmpfs mounts are rejected so the sidecar does not guess at host paths.
+
+Security model: `CONTAINER_NAME` is an identity hint, not strong peer
+authentication. Label checks are useful authorization hardening but do not prove
+that the socket peer is the claimed container. The sidecar is a trusted
+component: Docker socket access plus host-root visibility is effectively host
+powerful. Future work can add socket peer PID and cgroup verification.
 
 ## Shim
 
@@ -146,6 +197,10 @@ Unknown command-line options fail clearly. The shim reads `_FUSE_COMMFD`,
 connects to `CCC_FUSE_SIDECAR_SOCKET` or the default socket, asks the sidecar to
 mount, receives the FUSE fd over `SCM_RIGHTS`, and forwards it to libfuse over
 `_FUSE_COMMFD`.
+
+For Docker-inspect translation mode, set `CONTAINER_NAME` in the app container
+to the Docker container name that the sidecar is allowed to inspect. The shim
+also sends `HOSTNAME` as an optional container id hint for diagnostics.
 
 ## App-Side `/dev/fuse`
 
@@ -171,8 +226,18 @@ deployment must either mount the target tree through a host bind with suitable
 shared propagation into both containers, or run the privileged helper in the
 namespace where the resulting mount must be visible.
 
-When relying on propagation, use an `rshared` bind mount for the target tree in
-both the sidecar and app containers.
+When relying on propagation in legacy direct-prefix mode, use an `rshared` bind
+mount for the target tree in both the sidecar and app containers at the same
+container path. For Docker-inspect translation mode, the textual paths may differ
+(for example app `/storage/user` and sidecar `/host/storage/user`), but both must
+be views of the same host-backed tree and the app storage bind must use compatible
+shared propagation so the sidecar-created mount becomes visible in the app.
+
+Docker-inspect translation mode also requires the sidecar to see the host paths
+reported by Docker inspect under `--host-root`; for CCC-style storage this can be
+a narrower bind such as `/storage:/host/storage:rshared` rather than a full host
+root bind. Mounting `/var/run/docker.sock` gives the sidecar Docker API access and
+should be treated as host-powerful even when the bind is marked read-only.
 
 Pass `/dev/fuse` into the app container as a device mapping when libfuse may
 probe/open it before invoking `fusermount3`, but do not pass `CAP_SYS_ADMIN` or
@@ -183,6 +248,7 @@ See:
 
 - [examples/docker-run.sh](examples/docker-run.sh)
 - [examples/docker-compose.yml](examples/docker-compose.yml)
+- [examples/docker-compose-docker-inspect.yml](examples/docker-compose-docker-inspect.yml)
 
 ## CCC Integration
 
@@ -325,7 +391,7 @@ Expected local checks:
 ```bash
 CGO_ENABLED=0 GOOS=linux go test ./...
 CGO_ENABLED=0 GOOS=linux go build ./cmd/...
-bash -n examples/*.sh
+bash -n examples/*.sh tests/*.sh
 ```
 
 Static binary sanity check for the client shim:
@@ -337,4 +403,18 @@ ldd /tmp/fusermount3
 ```
 
 Runtime FUSE validation still requires a Docker host configured with `/dev/fuse`,
-`CAP_SYS_ADMIN`, and suitable mount propagation.
+`CAP_SYS_ADMIN`, Docker Compose v2, and suitable mount propagation. Run both
+runtime smoke tests when those prerequisites are available:
+
+```bash
+# Legacy direct-prefix mode: sidecar and client both use /mnt/ccc-fuse.
+tests/run-docker.sh
+
+# Docker-inspect translation mode: client uses /storage/user, while the sidecar
+# translates through Docker inspect and mounts under /host<host-source>.
+tests/run-docker-inspect.sh
+```
+
+Both tests run the same archivemount read/write/flush check: mount a tar archive,
+read `hello.txt`, write `created.txt`, force a flush, unmount normally, and verify
+the written file persisted into the archive.

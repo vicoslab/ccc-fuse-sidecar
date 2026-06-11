@@ -1,0 +1,49 @@
+services:
+  ccc-fuse-sidecar:
+    image: vicoslab/ccc-fuse-sidecar:latest
+    command:
+      - --docker-socket
+      - /var/run/docker.sock
+      - --host-root
+      - /host
+      - --allow-client-prefix
+      - /storage/user
+      - --allow-host-prefix
+      - /storage
+      - --require-container-label
+      - ccc.fuse=enabled
+    devices:
+      - /dev/fuse:/dev/fuse:rw
+    cap_add:
+      - SYS_ADMIN
+    volumes:
+      - ccc-fuse-control:/run/ccc-fuse-sidecar
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - type: bind
+        source: /storage
+        target: /host/storage
+        bind:
+          propagation: rshared
+
+  app:
+    image: your-ccc-app-with-fuse-shims:latest
+    container_name: ccc-fuse-demo-app
+    labels:
+      ccc.fuse: enabled
+    environment:
+      CCC_FUSE_SIDECAR_SOCKET: /run/ccc-fuse-sidecar/fuse.sock
+      CONTAINER_NAME: ccc-fuse-demo-app
+    devices:
+      - /dev/fuse:/dev/fuse:rw
+    volumes:
+      - ccc-fuse-control:/run/ccc-fuse-sidecar
+      - type: bind
+        source: /storage/user
+        target: /storage/user
+        bind:
+          propagation: rshared
+    depends_on:
+      - ccc-fuse-sidecar
+
+volumes:
+  ccc-fuse-control:

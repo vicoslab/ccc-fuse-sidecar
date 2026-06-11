@@ -1,0 +1,72 @@
+services:
+  fuse-sidecar:
+    image: ccc-fuse-sidecar:test-sidecar
+    restart: unless-stopped
+    network_mode: "none"
+    devices:
+      - /dev/fuse:/dev/fuse:rw
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - type: bind
+        source: ./run-inspect
+        target: /run/ccc-fuse-sidecar
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+      - type: bind
+        source: ./inspect-storage
+        target: /host${PWD}/tests/inspect-storage
+        bind:
+          propagation: rshared
+    command:
+      - --socket
+      - /run/ccc-fuse-sidecar/fuse.sock
+      - --docker-socket
+      - /var/run/docker.sock
+      - --host-root
+      - /host
+      - --allow-client-prefix
+      - /storage/user
+      - --allow-host-prefix
+      - ${PWD}/tests/inspect-storage
+      - --require-container-label
+      - ccc.fuse=enabled
+
+  fuse-client:
+    container_name: ${CCC_FUSE_INSPECT_CLIENT_NAME:-ccc-fuse-inspect-client}
+    labels:
+      ccc.fuse: enabled
+    depends_on:
+      - fuse-sidecar
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CCC_FUSE_CLIENT_IMAGE: ccc-fuse-sidecar:test-client
+    restart: "no"
+    network_mode: "none"
+    devices:
+      - /dev/fuse:/dev/fuse:rw
+    environment:
+      CONTAINER_NAME: ${CCC_FUSE_INSPECT_CLIENT_NAME:-ccc-fuse-inspect-client}
+      CCC_FUSE_TEST_MOUNTPOINT: /storage/user/rar
+    volumes:
+      - type: bind
+        source: ./run-inspect
+        target: /run/ccc-fuse-sidecar
+      - type: bind
+        source: ./inspect-storage
+        target: /storage/user
+        bind:
+          propagation: rshared
+      - type: bind
+        source: ./smoke-archivemount.sh
+        target: /usr/local/bin/ccc-fuse-smoke-archivemount
+        read_only: true
+    command:
+      - bash
+      - /usr/local/bin/ccc-fuse-smoke-archivemount

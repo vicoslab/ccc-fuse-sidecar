@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/vicoslab/ccc-fuse-sidecar/internal/fdpass"
@@ -22,6 +23,8 @@ type Config struct {
 	SocketPath      string
 	SocketMode      os.FileMode
 	AllowedPrefixes []string
+	DockerInspector DockerInspector
+	Translation     TranslationConfig
 	DevFusePath     string
 	Mount           MountFunc
 	Unmount         UnmountFunc
@@ -35,6 +38,13 @@ type Daemon struct {
 	log *log.Logger
 }
 
+type ResolvedMountpoint struct {
+	ClientPath             string
+	SidecarPath            string
+	AllowedSidecarPrefixes []string
+	Translation            *TranslatedMountpoint
+}
+
 func New(cfg Config) (*Daemon, error) {
 	if cfg.SocketPath == "" {
 		cfg.SocketPath = protocol.DefaultSocketPath
@@ -42,7 +52,17 @@ func New(cfg Config) (*Daemon, error) {
 	if err := protocol.ValidateSocketPath(cfg.SocketPath); err != nil {
 		return nil, err
 	}
-	if len(cfg.AllowedPrefixes) == 0 {
+	if cfg.Translation.Enabled {
+		if cfg.DockerInspector == nil {
+			return nil, errors.New("Docker inspector is required when translation mode is enabled")
+		}
+		if _, err := SidecarPrefixesForHostPrefixes(cfg.Translation.HostRoot, cfg.Translation.AllowedHostPrefixes); err != nil {
+			return nil, err
+		}
+		if len(cfg.Translation.AllowedClientPrefixes) == 0 {
+			return nil, errors.New("at least one allowed client prefix is required when translation mode is enabled")
+		}
+	} else if len(cfg.AllowedPrefixes) == 0 {
 		return nil, errors.New("at least one allowed mount prefix is required")
 	}
 	if cfg.SocketMode == 0 {
@@ -87,7 +107,11 @@ func (d *Daemon) ListenAndServe(ctx context.Context) error {
 		return fmt.Errorf("chmod socket %q: %w", d.cfg.SocketPath, err)
 	}
 
-	d.log.Printf("listening on %s; allowed prefixes: %v", d.cfg.SocketPath, d.cfg.AllowedPrefixes)
+	if d.cfg.Translation.Enabled {
+		d.log.Printf("listening on %s; Docker translation enabled; allowed client prefixes: %v; allowed host prefixes: %v; host root: %s", d.cfg.SocketPath, d.cfg.Translation.AllowedClientPrefixes, d.cfg.Translation.AllowedHostPrefixes, d.cfg.Translation.HostRoot)
+	} else {
+		d.log.Printf("listening on %s; allowed prefixes: %v", d.cfg.SocketPath, d.cfg.AllowedPrefixes)
+	}
 	go func() {
 		<-ctx.Done()
 		_ = listener.Close()
@@ -142,7 +166,7 @@ func (d *Daemon) handleConn(conn net.Conn) {
 		d.writeError(conn, fmt.Sprintf("read request: %v", err))
 		return
 	}
-	d.debugf("request action=%q mountpoint=%q options=%v lazy=%v", req.Action, req.Mountpoint, req.Options, req.Lazy)
+	d.debugf("request action=%q mountpoint=%q options=%v lazy=%v container=%q idHint=%q", req.Action, req.Mountpoint, req.Options, req.Lazy, req.ContainerName, req.ContainerIDHint)
 
 	switch req.Action {
 	case protocol.ActionMount:
@@ -155,13 +179,18 @@ func (d *Daemon) handleConn(conn net.Conn) {
 }
 
 func (d *Daemon) handleMount(conn *net.UnixConn, req protocol.Request) {
-	mountpointFile, mountTarget, err := protocol.OpenValidatedMountpoint(req.Mountpoint, d.cfg.AllowedPrefixes)
+	resolved, err := d.resolveMountpoint(context.Background(), req)
+	if err != nil {
+		d.writeError(conn, err.Error())
+		return
+	}
+	mountpointFile, mountTarget, err := protocol.OpenValidatedMountpoint(resolved.SidecarPath, resolved.AllowedSidecarPrefixes)
 	if err != nil {
 		d.writeError(conn, err.Error())
 		return
 	}
 	defer mountpointFile.Close()
-	d.debugf("validated mountpoint request=%q target=%q pinned=%q", req.Mountpoint, mountTarget, mountpointFile.Name())
+	d.debugf("validated mountpoint request=%q sidecar=%q target=%q pinned=%q", resolved.ClientPath, resolved.SidecarPath, mountTarget, mountpointFile.Name())
 
 	uid, gid := d.clientCreds(conn)
 	fuseFile, err := d.cfg.OpenFuse(d.cfg.DevFusePath)
@@ -180,7 +209,7 @@ func (d *Daemon) handleMount(conn *net.UnixConn, req protocol.Request) {
 	d.debugf("mount plan source=%q target=%q fstype=%q flags=0x%x data=%q uid=%d gid=%d fuseFD=%d", plan.Source, mountTarget, plan.FSType, plan.Flags, plan.Data, uid, gid, fuseFD)
 
 	if err := d.cfg.Mount(plan.Source, mountTarget, plan.FSType, plan.Flags, plan.Data); err != nil {
-		d.writeError(conn, fmt.Sprintf("mount %q: %v", req.Mountpoint, err))
+		d.writeError(conn, fmt.Sprintf("mount %q: %v", resolved.ClientPath, err))
 		return
 	}
 
@@ -192,11 +221,20 @@ func (d *Daemon) handleMount(conn *net.UnixConn, req protocol.Request) {
 		}
 		return
 	}
-	d.log.Printf("mounted %s and sent FUSE fd to uid=%d gid=%d", req.Mountpoint, uid, gid)
+	if resolved.Translation != nil {
+		d.log.Printf("mounted client=%s sidecar=%s host=%s container=%s id=%s and sent FUSE fd to uid=%d gid=%d", resolved.ClientPath, resolved.SidecarPath, resolved.Translation.HostPath, resolved.Translation.ContainerName, resolved.Translation.ContainerID, uid, gid)
+	} else {
+		d.log.Printf("mounted %s and sent FUSE fd to uid=%d gid=%d", resolved.ClientPath, uid, gid)
+	}
 }
 
 func (d *Daemon) handleUnmount(conn net.Conn, req protocol.Request) {
-	mountpoint, err := protocol.ValidateMountpoint(req.Mountpoint, d.cfg.AllowedPrefixes)
+	resolved, err := d.resolveMountpoint(context.Background(), req)
+	if err != nil {
+		d.writeError(conn, err.Error())
+		return
+	}
+	mountpoint, err := protocol.ValidateMountpoint(resolved.SidecarPath, resolved.AllowedSidecarPrefixes)
 	if err != nil {
 		d.writeError(conn, err.Error())
 		return
@@ -213,7 +251,43 @@ func (d *Daemon) handleUnmount(conn net.Conn, req protocol.Request) {
 	if err := protocol.WriteJSON(conn, protocol.Response{OK: true}); err != nil {
 		d.log.Printf("failed to write unmount response for %s: %v", mountpoint, err)
 	}
-	d.log.Printf("unmounted %s lazy=%v", mountpoint, req.Lazy)
+	if resolved.Translation != nil {
+		d.log.Printf("unmounted client=%s sidecar=%s host=%s container=%s lazy=%v", resolved.ClientPath, resolved.SidecarPath, resolved.Translation.HostPath, resolved.Translation.ContainerName, req.Lazy)
+	} else {
+		d.log.Printf("unmounted %s lazy=%v", mountpoint, req.Lazy)
+	}
+}
+
+func (d *Daemon) resolveMountpoint(ctx context.Context, req protocol.Request) (ResolvedMountpoint, error) {
+	if !d.cfg.Translation.Enabled {
+		return ResolvedMountpoint{
+			ClientPath:             req.Mountpoint,
+			SidecarPath:            req.Mountpoint,
+			AllowedSidecarPrefixes: d.cfg.AllowedPrefixes,
+		}, nil
+	}
+	if strings.TrimSpace(req.ContainerName) == "" {
+		return ResolvedMountpoint{}, errors.New("container_name is required in Docker translation mode")
+	}
+	inspect, err := d.cfg.DockerInspector.InspectContainer(ctx, req.ContainerName)
+	if err != nil {
+		return ResolvedMountpoint{}, err
+	}
+	translated, err := TranslateMountpoint(req, inspect, d.cfg.Translation)
+	if err != nil {
+		return ResolvedMountpoint{}, err
+	}
+	allowedSidecarPrefixes, err := SidecarPrefixesForHostPrefixes(d.cfg.Translation.HostRoot, d.cfg.Translation.AllowedHostPrefixes)
+	if err != nil {
+		return ResolvedMountpoint{}, err
+	}
+	d.debugf("translated mountpoint client=%q host=%q sidecar=%q source=%q destination=%q container=%q id=%q propagation=%q", translated.ClientPath, translated.HostPath, translated.SidecarPath, translated.MatchedSource, translated.MatchedDest, translated.ContainerName, translated.ContainerID, translated.Propagation)
+	return ResolvedMountpoint{
+		ClientPath:             translated.ClientPath,
+		SidecarPath:            translated.SidecarPath,
+		AllowedSidecarPrefixes: allowedSidecarPrefixes,
+		Translation:            &translated,
+	}, nil
 }
 
 func (d *Daemon) writeError(conn net.Conn, msg string) {
