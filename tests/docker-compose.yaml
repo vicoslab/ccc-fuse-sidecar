@@ -36,10 +36,6 @@ services:
     network_mode: "none"
     devices:
       - /dev/fuse:/dev/fuse:rw
-    security_opt:
-      - apparmor:unconfined
-    cap_drop:
-      - ALL
     volumes:
       - type: bind
         source: ./run
@@ -54,7 +50,7 @@ services:
         set -euxo pipefail
         mountpoint=/mnt/ccc-fuse/rar
         cleanup() {
-          fusermount3 -u -z "$mountpoint" >/dev/null 2>&1 || true
+          fusermount3 -u -z "$$mountpoint" >/dev/null 2>&1 || true
         }
         trap cleanup EXIT
 
@@ -64,14 +60,14 @@ services:
         done
         test -S /run/ccc-fuse-sidecar/fuse.sock
 
-        mkdir -p "$mountpoint"
+        mkdir -p "$$mountpoint"
         test -e /dev/fuse
         command -v archivemount
         command -v fusermount3
         test "$(readlink -f /usr/bin/fusermount3)" = /opt/ccc-fuse-sidecar/bin/fusermount3
 
-        archivemount /tmp/test.tar "$mountpoint"
-        test "$(cat "$mountpoint/hello.txt")" = hello
-        fusermount3 -u -z "$mountpoint"
+        archivemount /tmp/test.tar "$$mountpoint"
+        test "$$(cat "$${mountpoint}/hello.txt")" = hello
+        fusermount3 -u -z "$$mountpoint"
         echo "ccc-fuse-sidecar docker archivemount test passed"
       '
