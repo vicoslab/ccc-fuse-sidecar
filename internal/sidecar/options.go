@@ -2,7 +2,6 @@ package sidecar
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -136,39 +135,17 @@ func BuildMountPlan(fuseFD int, options []string, uid, gid int) (MountPlan, erro
 }
 
 func isAllowedFuseDataOption(key string, hasValue bool, value string) bool {
-	boolOptions := map[string]bool{
-		"allow_other":         true,
-		"default_permissions": true,
-		"kernel_cache":        true,
-		"auto_cache":          true,
-		"big_writes":          true,
-		"posix_acl":           true,
+	// The client shim is replacing fusermount, so it must not require a
+	// repository-side allow-list update every time libfuse or a FUSE tool starts
+	// passing a new safe data option. Keep ownership of privileged sidecar/kernel
+	// values in BuildMountPlan, reject the explicitly unsafe mount semantics there,
+	// and otherwise pass syntactically safe FUSE data options through to mount(2).
+	// Unknown options may still be rejected by the kernel, but the sidecar should
+	// not be the compatibility bottleneck.
+	if hasValue {
+		return value != ""
 	}
-	valueOptions := map[string]bool{
-		"subtype":              true,
-		"max_read":             true,
-		"max_write":            true,
-		"blksize":              true,
-		"attr_timeout":         true,
-		"entry_timeout":        true,
-		"negative_timeout":     true,
-		"congestion_threshold": true,
-	}
-	if boolOptions[key] {
-		return !hasValue
-	}
-	if valueOptions[key] {
-		if !hasValue {
-			return false
-		}
-		switch key {
-		case "subtype":
-			return value != ""
-		default:
-			return isNonNegativeNumber(value)
-		}
-	}
-	return false
+	return true
 }
 
 func validateMountOptionValue(key, value string) error {
@@ -179,17 +156,4 @@ func validateMountOptionValue(key, value string) error {
 		return fmt.Errorf("mount option %q has an unsafe value", key)
 	}
 	return nil
-}
-
-func isNonNegativeNumber(s string) bool {
-	if s == "" {
-		return false
-	}
-	if _, err := strconv.ParseUint(s, 10, 64); err == nil {
-		return true
-	}
-	if _, err := strconv.ParseFloat(s, 64); err == nil && !strings.HasPrefix(s, "-") {
-		return true
-	}
-	return false
 }
