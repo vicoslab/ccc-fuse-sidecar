@@ -46,7 +46,7 @@ func main() {
 	debug := flag.Bool("debug", false, "enable verbose request and mount-plan logs; can also be enabled with CCC_FUSE_DEBUG=1")
 	showVersion := flag.Bool("version", false, "print version")
 	flag.Var(&prefixes, "allow-prefix", "absolute mountpoint prefix to allow; may be repeated")
-	flag.Var(&clientPrefixes, "allow-client-prefix", "absolute client-visible mountpoint prefix to allow in Docker translation mode; may be repeated")
+	flag.Var(&clientPrefixes, "allow-client-prefix", "optional absolute client-visible mountpoint prefix to allow in Docker translation mode; may be repeated; when omitted, only translated host paths are allowlisted")
 	flag.Var(&hostPrefixes, "allow-host-prefix", "absolute host path prefix to allow in Docker translation mode; may be repeated; can also be set with CCC_FUSE_ALLOWED_HOST_PREFIXES")
 	flag.Var(&requiredLabels, "require-container-label", "required inspected Docker container label in key=value form; may be repeated")
 	flag.Parse()
@@ -78,7 +78,7 @@ func main() {
 		}
 		cfg.AllowedPrefixes = allowed
 	} else {
-		clients, err := parseRequiredPrefixes(clientPrefixes, "", "allowed client prefixes")
+		clients, err := parseOptionalPrefixes(clientPrefixes, "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "invalid allowed client prefixes: %v\n", err)
 			os.Exit(2)
@@ -157,6 +157,13 @@ func (l labelList) Map() (map[string]string, error) {
 		out[key] = strings.TrimSpace(value)
 	}
 	return out, nil
+}
+
+func parseOptionalPrefixes(values []string, env string) ([]string, error) {
+	if len(values) == 0 && strings.TrimSpace(env) == "" {
+		return nil, nil
+	}
+	return protocol.ParsePrefixes(values, env)
 }
 
 func parseRequiredPrefixes(values []string, env, name string) ([]string, error) {

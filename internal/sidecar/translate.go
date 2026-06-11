@@ -36,7 +36,7 @@ func TranslateMountpoint(req protocol.Request, inspect ContainerInspect, cfg Tra
 	if err != nil {
 		return TranslatedMountpoint{}, err
 	}
-	if !withinAnyPrefix(clientPath, cfg.AllowedClientPrefixes) {
+	if len(cfg.AllowedClientPrefixes) > 0 && !withinAnyPrefix(clientPath, cfg.AllowedClientPrefixes) {
 		return TranslatedMountpoint{}, fmt.Errorf("mountpoint %q is outside allowed client prefixes %s", clientPath, strings.Join(cfg.AllowedClientPrefixes, ", "))
 	}
 	if len(cfg.AllowedHostPrefixes) == 0 {

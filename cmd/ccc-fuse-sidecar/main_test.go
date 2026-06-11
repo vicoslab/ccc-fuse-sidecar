@@ -18,6 +18,26 @@ func TestParseRequiredPrefixesDoesNotUseLegacyDefault(t *testing.T) {
 	}
 }
 
+func TestParseOptionalPrefixesDoesNotUseLegacyDefault(t *testing.T) {
+	got, err := parseOptionalPrefixes(nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("prefixes = %#v, want nil", got)
+	}
+	got, err = parseOptionalPrefixes([]string{"/storage"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "/storage" {
+		t.Fatalf("prefixes = %#v", got)
+	}
+	if _, err := parseOptionalPrefixes([]string{"/"}, ""); err == nil {
+		t.Fatal("expected root prefix to be rejected")
+	}
+}
+
 func TestLabelListMap(t *testing.T) {
 	var labels labelList
 	if err := labels.Set("ccc.fuse=enabled"); err != nil {

@@ -6,8 +6,6 @@ services:
       - /var/run/docker.sock
       - --host-root
       - /host
-      - --allow-client-prefix
-      - /storage/user
       - --allow-host-prefix
       - /storage
       - --require-container-label

@@ -188,10 +188,9 @@ func TestDaemonMountProtocolTranslatesDockerPath(t *testing.T) {
 			Destination: "/storage/user",
 		})},
 		Translation: TranslationConfig{
-			Enabled:               true,
-			HostRoot:              hostRoot,
-			AllowedClientPrefixes: []string{"/storage/user"},
-			AllowedHostPrefixes:   []string{"/storage"},
+			Enabled:             true,
+			HostRoot:            hostRoot,
+			AllowedHostPrefixes: []string{"/storage"},
 		},
 		DevFusePath: fakeFusePath,
 		OpenFuse: func(path string) (*os.File, error) {
@@ -266,10 +265,9 @@ func TestDaemonUnmountProtocolTranslatesDockerPath(t *testing.T) {
 			Destination: "/storage/user",
 		})},
 		Translation: TranslationConfig{
-			Enabled:               true,
-			HostRoot:              hostRoot,
-			AllowedClientPrefixes: []string{"/storage/user"},
-			AllowedHostPrefixes:   []string{"/storage"},
+			Enabled:             true,
+			HostRoot:            hostRoot,
+			AllowedHostPrefixes: []string{"/storage"},
 		},
 		Unmount: func(target string, flags int) error {
 			gotTarget = target

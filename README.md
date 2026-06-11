@@ -145,7 +145,6 @@ ccc-fuse-sidecar \
   --socket /run/ccc-fuse-sidecar/fuse.sock \
   --docker-socket /var/run/docker.sock \
   --host-root /host \
-  --allow-client-prefix /storage/user \
   --allow-host-prefix /storage \
   --require-container-label ccc.fuse=enabled
 ```
@@ -157,8 +156,10 @@ Additional flags and environment:
   set.
 - `--host-root`: sidecar-visible root where host paths are mounted, for example
   `/host`.
-- `--allow-client-prefix`: client-visible path prefix accepted from app
-  containers. May be repeated. `/` is rejected.
+- `--allow-client-prefix`: optional client-visible path prefix policy for app
+  containers. May be repeated. When omitted, Docker-inspect mode accepts any
+  client path that resolves through Docker bind-mount metadata to an allowed
+  host path. `/` is rejected when the flag is used.
 - `--allow-host-prefix`: host path prefix accepted after Docker bind-mount
   translation. May be repeated. `/` is rejected.
 - `CCC_FUSE_ALLOWED_HOST_PREFIXES`: colon- or comma-separated fallback for

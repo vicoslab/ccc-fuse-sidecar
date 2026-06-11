@@ -59,9 +59,6 @@ func New(cfg Config) (*Daemon, error) {
 		if _, err := SidecarPrefixesForHostPrefixes(cfg.Translation.HostRoot, cfg.Translation.AllowedHostPrefixes); err != nil {
 			return nil, err
 		}
-		if len(cfg.Translation.AllowedClientPrefixes) == 0 {
-			return nil, errors.New("at least one allowed client prefix is required when translation mode is enabled")
-		}
 	} else if len(cfg.AllowedPrefixes) == 0 {
 		return nil, errors.New("at least one allowed mount prefix is required")
 	}

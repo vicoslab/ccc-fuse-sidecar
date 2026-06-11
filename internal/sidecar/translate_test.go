@@ -17,10 +17,9 @@ func TestTranslateMountpointMapsClientPathToSidecarPath(t *testing.T) {
 		Destination: "/storage/user",
 		Propagation: "rshared",
 	}), TranslationConfig{
-		Enabled:               true,
-		HostRoot:              "/host",
-		AllowedClientPrefixes: []string{"/storage/user"},
-		AllowedHostPrefixes:   []string{"/srv"},
+		Enabled:             true,
+		HostRoot:            "/host",
+		AllowedHostPrefixes: []string{"/srv"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +53,26 @@ func TestTranslateMountpointUsesLongestDestinationPrefix(t *testing.T) {
 	}
 	if translated.HostPath != "/secure/bob/mnt" {
 		t.Fatalf("host path = %q, want nested source", translated.HostPath)
+	}
+}
+
+func TestTranslateMountpointAllowsAnyClientPathWhenClientPrefixesOmitted(t *testing.T) {
+	translated, err := TranslateMountpoint(protocol.Request{
+		Mountpoint:    "/mnt/custom/project/mnt",
+		ContainerName: "ccc-demo",
+	}, inspectWithMounts(DockerMount{
+		Type:        "bind",
+		Source:      "/opt/shared_storage/user_data/bob",
+		Destination: "/mnt/custom",
+	}), TranslationConfig{
+		HostRoot:            "/host",
+		AllowedHostPrefixes: []string{"/opt/shared_storage"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if translated.HostPath != "/opt/shared_storage/user_data/bob/project/mnt" {
+		t.Fatalf("host path = %q", translated.HostPath)
 	}
 }
 
