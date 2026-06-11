@@ -68,6 +68,8 @@ services:
 
         archivemount /tmp/test.tar "$$mountpoint"
         ls $${mountpoint}
-        test "$$(cat "$${mountpoint}/hello.txt")" = hello && echo "ccc-fuse-sidecar docker archivemount test passed"
+        test "$$(cat "$${mountpoint}/hello.txt")" = hello
         fusermount3 -u -z "$$mountpoint"
+        trap - EXIT
+        echo "ccc-fuse-sidecar docker archivemount test passed"
       '
