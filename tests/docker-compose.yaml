@@ -1,0 +1,46 @@
+services:
+  fuse-sidecar:
+    build: .
+    restart: always
+    network_mode: "none"
+
+    devices:
+      - /dev/fuse:/dev/fuse:rw
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - "apparmor:unconfined"
+    volumes:
+      - ./run:/run/ccc-fuse-sidecar:rw
+      - ./mnt:/mnt/ccc-fuse:rw,share
+    command: '/usr/local/bin/ccc-fuse-sidecar --socket /run/ccc-fuse-sidecar/fuse.sock'
+
+  fuse-client:
+    depends_on:
+      - fuse-sidecar
+    build: .
+    restart: no
+    network_mode: "none"
+
+    devices:
+      - /dev/fuse:/dev/fuse:rw
+    volumes:
+      - ./run:/run/ccc-fuse-sidecar:rw
+      - ./mnt:/mnt/ccc-fuse:rw,share
+
+    command: >
+          bash -lc '
+              set -eux
+              echo "checking if tar created in tmp"
+              ls -la /tmp
+              echo "creating /mnt/ccc-fuse/rar"
+              mkdir -p /mnt/ccc-fuse/rar
+              ls -la /mnt/ccc-fuse/rar
+              echo "checking socket:"
+              ls -la /run/ccc-fuse-sidecar/
+              archivemount /tmp/test.tar /mnt/ccc-fuse/rar
+              ls -la /mnt/ccc-fuse/rar
+              cat /mnt/ccc-fuse/rar/hello.txt
+              echo "done ok"
+              sleep infinity
+          '
