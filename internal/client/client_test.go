@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -112,13 +113,39 @@ func TestRequestUnmount(t *testing.T) {
 		_ = json.NewEncoder(conn).Encode(protocol.Response{OK: true})
 	}()
 
-	err = requestUnmount(socketPath, Args{Mountpoint: "/mnt/demo", Lazy: true})
+	err = requestUnmount(socketPath, Args{Mountpoint: "/mnt/demo", Lazy: true}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := <-reqc
 	if req.Action != protocol.ActionUnmount || req.Mountpoint != "/mnt/demo" || !req.Lazy {
 		t.Fatalf("unexpected request: %+v", req)
+	}
+}
+
+func TestRunnerDebugLogsParsedMountRequest(t *testing.T) {
+	dir := t.TempDir()
+	mountpoint := filepath.Join(dir, "mnt")
+	if err := os.Mkdir(mountpoint, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(dir, "missing.sock")
+	env := map[string]string{
+		protocol.EnvSocketPath: socketPath,
+		protocol.EnvFuseCommFD: "7",
+		protocol.EnvDebug:      "1",
+	}
+	var stderr strings.Builder
+	code := Runner{
+		Getenv: func(k string) string { return env[k] },
+		Stderr: &stderr,
+	}.Run([]string{"fusermount3", "-o", "fsname=test", mountpoint})
+	if code == 0 {
+		t.Fatalf("exit code = 0, want failure because sidecar socket is absent")
+	}
+	log := stderr.String()
+	if !strings.Contains(log, "ccc-fuse-debug:") || !strings.Contains(log, "mountpoint=\""+mountpoint+"\"") || !strings.Contains(log, "_FUSE_COMMFD=7") {
+		t.Fatalf("debug log missing expected details:\n%s", log)
 	}
 }
 

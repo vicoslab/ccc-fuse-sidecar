@@ -16,6 +16,7 @@ const (
 	DefaultSocketPath = "/run/ccc-fuse-sidecar/fuse.sock"
 	EnvSocketPath     = "CCC_FUSE_SIDECAR_SOCKET"
 	EnvAllowedPrefix  = "CCC_FUSE_ALLOWED_PREFIXES"
+	EnvDebug          = "CCC_FUSE_DEBUG"
 	EnvFuseCommFD     = "_FUSE_COMMFD"
 
 	ActionMount   = "mount"

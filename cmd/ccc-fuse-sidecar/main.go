@@ -38,6 +38,7 @@ func main() {
 	socketPath := flag.String("socket", protocol.DefaultSocketPath, "Unix-domain socket path for app containers")
 	socketMode := flag.String("socket-mode", "0666", "octal permissions for the created Unix-domain socket")
 	devFusePath := flag.String("dev-fuse", "/dev/fuse", "path to the FUSE device in the privileged sidecar")
+	debug := flag.Bool("debug", false, "enable verbose request and mount-plan logs; can also be enabled with CCC_FUSE_DEBUG=1")
 	showVersion := flag.Bool("version", false, "print version")
 	flag.Var(&prefixes, "allow-prefix", "absolute mountpoint prefix to allow; may be repeated")
 	flag.Parse()
@@ -59,12 +60,14 @@ func main() {
 	}
 
 	logger := log.New(os.Stderr, "ccc-fuse-sidecar: ", log.LstdFlags|log.Lmicroseconds)
+	debugEnabled := *debug || envTruthy(os.Getenv(protocol.EnvDebug))
 	daemon, err := sidecar.New(sidecar.Config{
 		SocketPath:      *socketPath,
 		SocketMode:      mode,
 		AllowedPrefixes: allowed,
 		DevFusePath:     *devFusePath,
 		Logger:          logger,
+		Debug:           debugEnabled,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "configure daemon: %v\n", err)
@@ -77,4 +80,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "daemon failed: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func envTruthy(v string) bool {
+	v = strings.TrimSpace(strings.ToLower(v))
+	return v != "" && v != "0" && v != "false" && v != "no" && v != "off"
 }

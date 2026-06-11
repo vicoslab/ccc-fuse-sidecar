@@ -27,6 +27,7 @@ type Config struct {
 	Unmount         UnmountFunc
 	OpenFuse        OpenFuseFunc
 	Logger          *log.Logger
+	Debug           bool
 }
 
 type Daemon struct {
@@ -141,6 +142,7 @@ func (d *Daemon) handleConn(conn net.Conn) {
 		d.writeError(conn, fmt.Sprintf("read request: %v", err))
 		return
 	}
+	d.debugf("request action=%q mountpoint=%q options=%v lazy=%v", req.Action, req.Mountpoint, req.Options, req.Lazy)
 
 	switch req.Action {
 	case protocol.ActionMount:
@@ -159,6 +161,7 @@ func (d *Daemon) handleMount(conn *net.UnixConn, req protocol.Request) {
 		return
 	}
 	defer mountpointFile.Close()
+	d.debugf("validated mountpoint request=%q target=%q pinned=%q", req.Mountpoint, mountTarget, mountpointFile.Name())
 
 	uid, gid := d.clientCreds(conn)
 	fuseFile, err := d.cfg.OpenFuse(d.cfg.DevFusePath)
@@ -174,6 +177,7 @@ func (d *Daemon) handleMount(conn *net.UnixConn, req protocol.Request) {
 		d.writeError(conn, err.Error())
 		return
 	}
+	d.debugf("mount plan source=%q target=%q fstype=%q flags=0x%x data=%q uid=%d gid=%d fuseFD=%d", plan.Source, mountTarget, plan.FSType, plan.Flags, plan.Data, uid, gid, fuseFD)
 
 	if err := d.cfg.Mount(plan.Source, mountTarget, plan.FSType, plan.Flags, plan.Data); err != nil {
 		d.writeError(conn, fmt.Sprintf("mount %q: %v", req.Mountpoint, err))
@@ -216,6 +220,12 @@ func (d *Daemon) writeError(conn net.Conn, msg string) {
 	d.log.Printf("request failed: %s", msg)
 	if err := protocol.WriteJSON(conn, protocol.Response{OK: false, Error: msg}); err != nil {
 		d.log.Printf("failed to write error response: %v", err)
+	}
+}
+
+func (d *Daemon) debugf(format string, args ...any) {
+	if d.cfg.Debug {
+		d.log.Printf("debug: "+format, args...)
 	}
 }
 

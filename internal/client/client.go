@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/vicoslab/ccc-fuse-sidecar/internal/fdpass"
 	"github.com/vicoslab/ccc-fuse-sidecar/internal/protocol"
@@ -58,15 +59,17 @@ func (r Runner) Run(argv []string) int {
 		fmt.Fprintf(stderr, "%s: mountpoint is required\n", argv[0])
 		return 2
 	}
+	debug := debugEnabled(getenv)
 
 	socketPath := protocol.SocketPathFromEnv(getenv)
 	if err := protocol.ValidateSocketPath(socketPath); err != nil {
 		printErr(stderr, args.Quiet, "%s: invalid %s: %v\n", argv[0], protocol.EnvSocketPath, err)
 		return 1
 	}
+	debugf(stderr, debug, "%s: action=%s socket=%s mountpoint=%q options=%q lazy=%v quiet=%v\n", argv[0], actionName(args), socketPath, args.Mountpoint, args.Options, args.Lazy, args.Quiet)
 
 	if args.Unmount {
-		if err := requestUnmount(socketPath, args); err != nil {
+		if err := requestUnmount(socketPath, args, stderr, debug); err != nil {
 			printErr(stderr, args.Quiet, "%s: %v\n", argv[0], err)
 			return 1
 		}
@@ -78,19 +81,22 @@ func (r Runner) Run(argv []string) int {
 		printErr(stderr, args.Quiet, "%s: %s is required and must be a Unix socket fd\n", argv[0], protocol.EnvFuseCommFD)
 		return 1
 	}
-	if err := requestMountAndForwardFD(socketPath, commFD, args); err != nil {
+	debugf(stderr, debug, "%s: using %s=%d\n", argv[0], protocol.EnvFuseCommFD, commFD)
+	if err := requestMountAndForwardFD(socketPath, commFD, args, stderr, debug); err != nil {
 		printErr(stderr, args.Quiet, "%s: %v\n", argv[0], err)
 		return 1
 	}
 	return 0
 }
 
-func requestMountAndForwardFD(socketPath string, commFD int, args Args) error {
+func requestMountAndForwardFD(socketPath string, commFD int, args Args, debugOut io.Writer, debug bool) error {
+	debugf(debugOut, debug, "fusermount3: requesting mount for %q via %s\n", args.Mountpoint, socketPath)
 	fuseFD, err := RequestMount(socketPath, args)
 	if err != nil {
 		return err
 	}
 	defer syscallClose(fuseFD)
+	debugf(debugOut, debug, "fusermount3: received FUSE fd %d from sidecar\n", fuseFD)
 
 	commConn, err := fdpass.UnixConnFromRawFD(commFD)
 	if err != nil {
@@ -100,6 +106,7 @@ func requestMountAndForwardFD(socketPath string, commFD int, args Args) error {
 	if err := fdpass.SendFD(commConn, fuseFD, []byte{0}); err != nil {
 		return fmt.Errorf("forward FUSE fd to libfuse: %w", err)
 	}
+	debugf(debugOut, debug, "fusermount3: forwarded FUSE fd %d to libfuse comm fd %d\n", fuseFD, commFD)
 	return nil
 }
 
@@ -146,7 +153,8 @@ func RequestMount(socketPath string, args Args) (int, error) {
 	return fuseFD, nil
 }
 
-func requestUnmount(socketPath string, args Args) error {
+func requestUnmount(socketPath string, args Args, debugOut io.Writer, debug bool) error {
+	debugf(debugOut, debug, "fusermount3: requesting unmount for %q lazy=%v via %s\n", args.Mountpoint, args.Lazy, socketPath)
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("connect to sidecar socket %q: %w", socketPath, err)
@@ -168,7 +176,27 @@ func requestUnmount(socketPath string, args Args) error {
 	if !resp.OK {
 		return errors.New(resp.Error)
 	}
+	debugf(debugOut, debug, "fusermount3: sidecar unmounted %q lazy=%v\n", args.Mountpoint, args.Lazy)
 	return nil
+}
+
+func debugEnabled(getenv func(string) string) bool {
+	v := strings.TrimSpace(strings.ToLower(getenv(protocol.EnvDebug)))
+	return v != "" && v != "0" && v != "false" && v != "no" && v != "off"
+}
+
+func debugf(w io.Writer, enabled bool, format string, args ...any) {
+	if !enabled || w == nil {
+		return
+	}
+	fmt.Fprintf(w, "ccc-fuse-debug: "+format, args...)
+}
+
+func actionName(args Args) string {
+	if args.Unmount {
+		return protocol.ActionUnmount
+	}
+	return protocol.ActionMount
 }
 
 func printHelp(w io.Writer, name string) {
@@ -187,7 +215,8 @@ Options:
 Environment:
   %[2]s   sidecar Unix socket (default %[3]s)
   %[4]s              libfuse communication fd for mount requests
-`, name, protocol.EnvSocketPath, protocol.DefaultSocketPath, protocol.EnvFuseCommFD)
+  %[5]s           enable verbose helper debug logs when set to 1/true/yes
+`, name, protocol.EnvSocketPath, protocol.DefaultSocketPath, protocol.EnvFuseCommFD, protocol.EnvDebug)
 }
 
 func printErr(w io.Writer, quiet bool, format string, args ...any) {
