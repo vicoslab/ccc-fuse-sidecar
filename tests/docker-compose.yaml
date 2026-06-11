@@ -1,46 +1,77 @@
 services:
   fuse-sidecar:
-    build: .
-    restart: always
+    image: ccc-fuse-sidecar:test-sidecar
+    restart: unless-stopped
     network_mode: "none"
-
     devices:
       - /dev/fuse:/dev/fuse:rw
     cap_add:
       - SYS_ADMIN
     security_opt:
-      - "apparmor:unconfined"
+      - apparmor:unconfined
     volumes:
-      - ./run:/run/ccc-fuse-sidecar:rw
-      - ./mnt:/mnt/ccc-fuse:rw,share
-    command: '/usr/local/bin/ccc-fuse-sidecar --socket /run/ccc-fuse-sidecar/fuse.sock'
+      - type: bind
+        source: ./run
+        target: /run/ccc-fuse-sidecar
+      - type: bind
+        source: ./mnt
+        target: /mnt/ccc-fuse
+        bind:
+          propagation: rshared
+    command:
+      - --socket
+      - /run/ccc-fuse-sidecar/fuse.sock
+      - --allow-prefix
+      - /mnt/ccc-fuse
 
   fuse-client:
     depends_on:
       - fuse-sidecar
-    build: .
-    restart: no
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CCC_FUSE_CLIENT_IMAGE: ccc-fuse-sidecar:test-client
+    restart: "no"
     network_mode: "none"
-
     devices:
       - /dev/fuse:/dev/fuse:rw
+    security_opt:
+      - apparmor:unconfined
+    cap_drop:
+      - ALL
     volumes:
-      - ./run:/run/ccc-fuse-sidecar:rw
-      - ./mnt:/mnt/ccc-fuse:rw,share
-
+      - type: bind
+        source: ./run
+        target: /run/ccc-fuse-sidecar
+      - type: bind
+        source: ./mnt
+        target: /mnt/ccc-fuse
+        bind:
+          propagation: rshared
     command: >
-          bash -lc '
-              set -eux
-              echo "checking if tar created in tmp"
-              ls -la /tmp
-              echo "creating /mnt/ccc-fuse/rar"
-              mkdir -p /mnt/ccc-fuse/rar
-              ls -la /mnt/ccc-fuse/rar
-              echo "checking socket:"
-              ls -la /run/ccc-fuse-sidecar/
-              archivemount /tmp/test.tar /mnt/ccc-fuse/rar
-              ls -la /mnt/ccc-fuse/rar
-              cat /mnt/ccc-fuse/rar/hello.txt
-              echo "done ok"
-              sleep infinity
-          '
+      bash -lc '
+        set -euxo pipefail
+        mountpoint=/mnt/ccc-fuse/rar
+        cleanup() {
+          fusermount3 -u -z "$mountpoint" >/dev/null 2>&1 || true
+        }
+        trap cleanup EXIT
+
+        for i in $(seq 1 100); do
+          test -S /run/ccc-fuse-sidecar/fuse.sock && break
+          sleep 0.1
+        done
+        test -S /run/ccc-fuse-sidecar/fuse.sock
+
+        mkdir -p "$mountpoint"
+        test -e /dev/fuse
+        command -v archivemount
+        command -v fusermount3
+        test "$(readlink -f /usr/bin/fusermount3)" = /opt/ccc-fuse-sidecar/bin/fusermount3
+
+        archivemount /tmp/test.tar "$mountpoint"
+        test "$(cat "$mountpoint/hello.txt")" = hello
+        fusermount3 -u -z "$mountpoint"
+        echo "ccc-fuse-sidecar docker archivemount test passed"
+      '
