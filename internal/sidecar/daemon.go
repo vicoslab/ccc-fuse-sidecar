@@ -231,7 +231,7 @@ func (d *Daemon) handleUnmount(conn net.Conn, req protocol.Request) {
 		d.writeError(conn, err.Error())
 		return
 	}
-	mountpoint, err := protocol.ValidateMountpoint(resolved.SidecarPath, resolved.AllowedSidecarPrefixes)
+	mountpoint, err := protocol.ValidateUnmountTarget(resolved.SidecarPath, resolved.AllowedSidecarPrefixes)
 	if err != nil {
 		d.writeError(conn, err.Error())
 		return

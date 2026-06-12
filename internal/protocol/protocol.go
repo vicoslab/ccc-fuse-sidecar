@@ -167,6 +167,39 @@ func ValidateMountpoint(mountpoint string, allowedPrefixes []string) (string, er
 	return "", fmt.Errorf("mountpoint %q is outside allowed prefixes %s", realMountpoint, strings.Join(allowedPrefixes, ", "))
 }
 
+func ValidateUnmountTarget(mountpoint string, allowedPrefixes []string) (string, error) {
+	if strings.ContainsRune(mountpoint, 0) {
+		return "", errors.New("mountpoint contains NUL")
+	}
+	if !filepath.IsAbs(mountpoint) {
+		return "", fmt.Errorf("mountpoint %q is not absolute", mountpoint)
+	}
+	clean := filepath.Clean(mountpoint)
+	if clean == string(filepath.Separator) {
+		return "", errors.New("refusing to unmount filesystem root")
+	}
+
+	parent := filepath.Dir(clean)
+	realParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve mountpoint parent %q: %w", parent, err)
+	}
+	realParent = filepath.Clean(realParent)
+	target := filepath.Join(realParent, filepath.Base(clean))
+
+	for _, prefix := range allowedPrefixes {
+		realPrefix := filepath.Clean(prefix)
+		if resolved, err := filepath.EvalSymlinks(realPrefix); err == nil {
+			realPrefix = filepath.Clean(resolved)
+		}
+		if PathWithin(target, realPrefix) {
+			return target, nil
+		}
+	}
+
+	return "", fmt.Errorf("mountpoint %q is outside allowed prefixes %s", target, strings.Join(allowedPrefixes, ", "))
+}
+
 func OpenValidatedMountpoint(mountpoint string, allowedPrefixes []string) (*os.File, string, error) {
 	clean, err := ValidateMountpoint(mountpoint, allowedPrefixes)
 	if err != nil {

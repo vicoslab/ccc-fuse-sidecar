@@ -253,7 +253,7 @@ func TestDaemonUnmountProtocolTranslatesDockerPath(t *testing.T) {
 	dir := t.TempDir()
 	hostRoot := filepath.Join(dir, "host")
 	sidecarMountpoint := filepath.Join(hostRoot, "storage", "user", "project", "mnt")
-	if err := os.MkdirAll(sidecarMountpoint, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(sidecarMountpoint), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	var gotTarget string
