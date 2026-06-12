@@ -28,6 +28,7 @@ func BuildMountPlan(fuseFD int, options []string, uid, gid int) (MountPlan, erro
 	}
 
 	source := defaultFSName
+	fstype := fuseFSType
 	flags := uintptr(syscall.MS_NODEV | syscall.MS_NOSUID)
 	data := []string{
 		fmt.Sprintf("fd=%d", fuseFD),
@@ -110,6 +111,19 @@ func BuildMountPlan(fuseFD int, options []string, uid, gid int) (MountPlan, erro
 			}
 			source = value
 			continue
+		case "subtype":
+			// libfuse/mount.fuse encodes a FUSE subtype in the filesystem type
+			// field passed to mount(2), for example fstype="fuse.rclone". Keeping
+			// subtype in the comma-separated data string while using fstype="fuse"
+			// is not equivalent and can fail with EPERM for tools that set subtype.
+			if !hasValue {
+				return MountPlan{}, fmt.Errorf("mount option %q requires a value", key)
+			}
+			if err := validateMountSubtype(value); err != nil {
+				return MountPlan{}, err
+			}
+			fstype = fuseFSType + "." + value
+			continue
 		}
 
 		if !isAllowedFuseDataOption(key, hasValue, value) {
@@ -128,7 +142,7 @@ func BuildMountPlan(fuseFD int, options []string, uid, gid int) (MountPlan, erro
 
 	return MountPlan{
 		Source: source,
-		FSType: fuseFSType,
+		FSType: fstype,
 		Flags:  flags,
 		Data:   strings.Join(data, ","),
 	}, nil
@@ -146,6 +160,16 @@ func isAllowedFuseDataOption(key string, hasValue bool, value string) bool {
 		return value != ""
 	}
 	return true
+}
+
+func validateMountSubtype(value string) error {
+	if err := validateMountOptionValue("subtype", value); err != nil {
+		return err
+	}
+	if strings.ContainsAny(value, "/\\ 	") {
+		return fmt.Errorf("mount option %q has an unsafe value", "subtype")
+	}
+	return nil
 }
 
 func validateMountOptionValue(key, value string) error {
