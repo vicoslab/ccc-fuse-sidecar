@@ -12,6 +12,16 @@ func TestParseArgsMount(t *testing.T) {
 	}
 }
 
+func TestParseArgsUmountLazyAlias(t *testing.T) {
+	got, err := ParseArgs([]string{"-l", "/mnt/fuse"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Lazy || got.Mountpoint != "/mnt/fuse" {
+		t.Fatalf("unexpected args: %+v", got)
+	}
+}
+
 func TestParseArgsRejectsUnknown(t *testing.T) {
 	if _, err := ParseArgs([]string{"--definitely-unknown", "/mnt"}); err == nil {
 		t.Fatal("expected unknown option error")

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -42,6 +43,9 @@ func (r Runner) Run(argv []string) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", argv[0], err)
 		return 2
+	}
+	if invokedAsUmount(argv[0]) {
+		args.Unmount = true
 	}
 	if args.Help {
 		printHelp(stdout, argv[0])
@@ -220,6 +224,10 @@ func actionName(args Args) string {
 		return protocol.ActionUnmount
 	}
 	return protocol.ActionMount
+}
+
+func invokedAsUmount(argv0 string) bool {
+	return filepath.Base(argv0) == "umount"
 }
 
 func printHelp(w io.Writer, name string) {

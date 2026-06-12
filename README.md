@@ -190,14 +190,20 @@ Supported options:
 - `-o`, `--options`
 - `-u`, `--unmount`
 - `-z`, `--lazy`
+- `-l` as an `umount`-style lazy unmount alias
 - `-q`, `--quiet`
 - `-V`, `--version`
 - `-h`, `--help`
 
-Unknown command-line options fail clearly. The shim reads `_FUSE_COMMFD`,
-connects to `CCC_FUSE_SIDECAR_SOCKET` or the default socket, asks the sidecar to
-mount, receives the FUSE fd over `SCM_RIGHTS`, and forwards it to libfuse over
-`_FUSE_COMMFD`.
+When the same client binary is invoked through a symlink named `umount`, it treats
+`umount MOUNTPOINT` as `fusermount3 -u MOUNTPOINT` and sends an unmount request
+to the sidecar without requiring `_FUSE_COMMFD`. This is intended for app
+containers where ordinary users lack app-side `umount(2)` authority.
+
+Unknown command-line options fail clearly. The shim reads `_FUSE_COMMFD` for
+mount requests, connects to `CCC_FUSE_SIDECAR_SOCKET` or the default socket,
+asks the sidecar to mount, receives the FUSE fd over `SCM_RIGHTS`, and forwards
+it to libfuse over `_FUSE_COMMFD`.
 
 For Docker-inspect translation mode, set `CONTAINER_NAME` in the app container
 to the Docker container name that the sidecar is allowed to inspect. The shim
@@ -299,6 +305,15 @@ libfuse or users commonly probe:
 /bin/fusermount3            /bin/fusermount            /bin/fusemount3            /bin/fusemount
 ```
 
+The CCC startup relink hook also installs a small wrapper:
+
+```sh
+/usr/local/bin/umount "$@"  ->  /opt/ccc-fuse-sidecar/bin/fusermount3 -u "$@"
+```
+
+Only `/usr/local/bin/umount` is used for this convenience wrapper, so absolute
+system calls to `/bin/umount` remain the real util-linux helper.
+
 The CCC image sets the default control socket path:
 
 ```dockerfile
@@ -331,6 +346,7 @@ CCC_FUSE_CLIENT_BIN_DIR=/opt/ccc-fuse-sidecar/bin
 CCC_FUSE_HELPER_DIRS=/usr/local/bin:/usr/bin:/bin
 CCC_FUSE_SOCKET_DIR=/run/ccc-fuse-sidecar
 CCC_FUSE_SIDECAR_SOCKET=/run/ccc-fuse-sidecar/fuse.sock
+CCC_FUSE_UMOUNT_SHIM_PATH=/usr/local/bin/umount
 ```
 
 ### CCC runtime contract

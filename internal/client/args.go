@@ -37,7 +37,7 @@ func ParseArgs(argv []string) (Args, error) {
 			out.Version = true
 		case arg == "-u" || arg == "--unmount":
 			out.Unmount = true
-		case arg == "-z" || arg == "--lazy":
+		case arg == "-z" || arg == "--lazy" || arg == "-l":
 			out.Lazy = true
 		case arg == "-q" || arg == "--quiet":
 			out.Quiet = true
@@ -77,6 +77,8 @@ func parseCombinedShort(flags string, out *Args) error {
 		case 'u':
 			out.Unmount = true
 		case 'z':
+			out.Lazy = true
+		case 'l':
 			out.Lazy = true
 		case 'q':
 			out.Quiet = true

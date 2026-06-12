@@ -125,6 +125,47 @@ func TestRequestUnmount(t *testing.T) {
 	}
 }
 
+func TestRunnerInvokedAsUmountRequestsUnmount(t *testing.T) {
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "sidecar.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	reqc := make(chan protocol.Request, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			reqc <- protocol.Request{Action: err.Error()}
+			return
+		}
+		defer conn.Close()
+		req, err := protocol.ReadRequest(conn)
+		if err != nil {
+			reqc <- protocol.Request{Action: err.Error()}
+			return
+		}
+		reqc <- req
+		_ = json.NewEncoder(conn).Encode(protocol.Response{OK: true})
+	}()
+
+	env := map[string]string{
+		protocol.EnvSocketPath:    socketPath,
+		protocol.EnvContainerName: "ccc-demo",
+		protocol.EnvHostname:      "abc123",
+	}
+	code := Runner{Getenv: func(k string) string { return env[k] }}.Run([]string{"umount", "-l", "/mnt/demo"})
+	if code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
+	req := <-reqc
+	if req.Action != protocol.ActionUnmount || req.Mountpoint != "/mnt/demo" || !req.Lazy || req.ContainerName != "ccc-demo" || req.ContainerIDHint != "abc123" {
+		t.Fatalf("unexpected request: %+v", req)
+	}
+}
+
 func TestRunnerDebugLogsParsedMountRequest(t *testing.T) {
 	dir := t.TempDir()
 	mountpoint := filepath.Join(dir, "mnt")
