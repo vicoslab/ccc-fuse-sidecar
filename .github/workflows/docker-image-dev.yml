@@ -1,0 +1,90 @@
+name: Docker Dev Image CI
+
+# Manual-only workflow for building development sidecar/client images from the
+# ref selected in the GitHub Actions "Run workflow" UI. This intentionally does
+# not run on pushes, pull requests, or tags.
+on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: "Docker image repository to push, without tag"
+        required: true
+        default: "vicoslab/ccc-fuse-sidecar"
+
+run-name: Build dev CCC FUSE sidecar images from ${{ github.ref_name }}
+
+jobs:
+  build-dev-images:
+    name: Build dev sidecar/client images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@v4
+
+      - name: Validate inputs and set image tags
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${IMAGE_NAME}" || "${IMAGE_NAME}" =~ [[:space:]] ]]; then
+            echo "image_name must not be empty or contain whitespace" >&2
+            exit 1
+          fi
+
+          if [[ "${IMAGE_NAME}" == *:* ]]; then
+            echo "image_name must be a repository name without a tag; this workflow publishes :dev and :client-dev" >&2
+            exit 1
+          fi
+
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_ENV}"
+          echo "VERSION=dev-${REF_NAME}" >> "${GITHUB_ENV}"
+          echo "SIDECAR_IMAGE=${IMAGE_NAME}:dev" >> "${GITHUB_ENV}"
+          echo "CLIENT_IMAGE=${IMAGE_NAME}:client-dev" >> "${GITHUB_ENV}"
+
+          {
+            echo "## CCC FUSE sidecar dev images"
+            echo
+            echo "Selected ref: \`${REF_NAME}\`"
+            echo "Sidecar image: \`${IMAGE_NAME}:dev\`"
+            echo "Client image: \`${IMAGE_NAME}:client-dev\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push CCC FUSE sidecar dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: sidecar
+          push: true
+          tags: ${{ env.SIDECAR_IMAGE }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          cache-from: type=registry,ref=${{ env.SIDECAR_IMAGE }}
+          cache-to: type=inline
+          pull: true
+
+      - name: Build and push CCC FUSE client dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: client
+          push: true
+          tags: ${{ env.CLIENT_IMAGE }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          cache-from: type=registry,ref=${{ env.CLIENT_IMAGE }}
+          cache-to: type=inline
+          pull: true

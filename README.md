@@ -81,6 +81,21 @@ vicoslab/ccc-fuse-sidecar:client-<release-tag>
 vicoslab/ccc-fuse-sidecar:client-latest
 ```
 
+For manual development builds, run the `Docker Dev Image CI` workflow from
+GitHub Actions, select the branch/tag in GitHub's built-in **Run workflow from**
+selector, and provide only:
+
+```text
+image_name: Docker image repository to push, without tag
+```
+
+The dev workflow always publishes:
+
+```text
+<image_name>:dev
+<image_name>:client-dev
+```
+
 There are no separate `sidecar-*` tags; the unprefixed tags are the sidecar
 runtime image. The `client-*` prefix is only needed to distinguish the shim-only
 image from the runtime image in the same Docker Hub repository.
