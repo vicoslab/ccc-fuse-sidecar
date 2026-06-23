@@ -291,6 +291,39 @@ and rollback/commit decisions should live in a separate trusted BranchFS agent
 supervisor. In the combined CCC/BranchFS workspace, see
 `../CCC_AGENT_BRANCHFS_PROTECTION_REVIEW_DESIGN.md` for that higher-level design.
 
+### BranchFS agent session bundles
+
+One CCC agent session (managed by `ccc-agent-run` in the `ccc` repo) mounts a
+*bundle* of BranchFS views — typically one per protected root:
+
+```text
+/__branchfs_mounts/<session-id>/storage_user    branch view of /storage/user
+/__branchfs_mounts/<session-id>/storage_group   branch view of /storage/group   (optional)
+```
+
+Each mount is an ordinary FUSE mount from the sidecar's perspective: the
+unprivileged `branchfs` daemon inside the app container calls the
+`fusermount3` shim, which forwards the request over the sidecar socket and
+receives `/dev/fuse` fds back. The sidecar needs **no bundle-specific
+request types** — sessions are a supervisor concept, and keeping them out of
+the sidecar keeps policy out of the privileged component.
+
+What the protocol does carry is an opt-in audit hint: the shim forwards
+`CCC_AGENT_SESSION` (set by the supervisor for every process in a contained
+session) as `session_id`, and the sidecar includes `session=<id>` in its
+mount/unmount log lines. That makes it possible to correlate node-level FUSE
+activity with the durable session records under the supervisor's state dir.
+The id is informational only — it never participates in authorization or
+path translation.
+
+Path translation note for contained roots: the supervisor binds the BranchFS
+view *inside* the agent chroot (e.g. view → `<chroot>/storage/user`), but the
+mountpoint it asks the sidecar to mount is the view path itself
+(`/__branchfs_mounts/...`). Only that view path must be coherent between the
+app container and the sidecar — either identical bind mounts (legacy
+direct-prefix mode) or resolvable through Docker-inspect translation. Chroot-
+internal binds never reach the sidecar.
+
 ### CCC base image contract
 
 CCC base images consume a published client image selected by:
