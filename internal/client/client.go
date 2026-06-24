@@ -64,17 +64,17 @@ func (r Runner) Run(argv []string) int {
 		return 2
 	}
 	debug := debugEnabled(getenv)
-	containerName, containerIDHint := containerIdentityFromEnv(getenv)
+	containerName, containerIDHint, sessionID := containerIdentityFromEnv(getenv)
 
 	socketPath := protocol.SocketPathFromEnv(getenv)
 	if err := protocol.ValidateSocketPath(socketPath); err != nil {
 		printErr(stderr, args.Quiet, "%s: invalid %s: %v\n", argv[0], protocol.EnvSocketPath, err)
 		return 1
 	}
-	debugf(stderr, debug, "%s: action=%s socket=%s mountpoint=%q options=%q lazy=%v quiet=%v%s\n", argv[0], actionName(args), socketPath, args.Mountpoint, args.Options, args.Lazy, args.Quiet, formatIdentityDebug(containerName, containerIDHint))
+	debugf(stderr, debug, "%s: action=%s socket=%s mountpoint=%q options=%q lazy=%v quiet=%v%s\n", argv[0], actionName(args), socketPath, args.Mountpoint, args.Options, args.Lazy, args.Quiet, formatIdentityDebug(containerName, containerIDHint, sessionID))
 
 	if args.Unmount {
-		if err := requestUnmount(socketPath, args, containerName, containerIDHint, stderr, debug); err != nil {
+		if err := requestUnmount(socketPath, args, containerName, containerIDHint, sessionID, stderr, debug); err != nil {
 			printErr(stderr, args.Quiet, "%s: %v\n", argv[0], err)
 			return 1
 		}
@@ -87,16 +87,16 @@ func (r Runner) Run(argv []string) int {
 		return 1
 	}
 	debugf(stderr, debug, "%s: using %s=%d\n", argv[0], protocol.EnvFuseCommFD, commFD)
-	if err := requestMountAndForwardFD(socketPath, commFD, args, containerName, containerIDHint, stderr, debug); err != nil {
+	if err := requestMountAndForwardFD(socketPath, commFD, args, containerName, containerIDHint, sessionID, stderr, debug); err != nil {
 		printErr(stderr, args.Quiet, "%s: %v\n", argv[0], err)
 		return 1
 	}
 	return 0
 }
 
-func requestMountAndForwardFD(socketPath string, commFD int, args Args, containerName, containerIDHint string, debugOut io.Writer, debug bool) error {
-	debugf(debugOut, debug, "fusermount3: requesting mount for %q via %s%s\n", args.Mountpoint, socketPath, formatIdentityDebug(containerName, containerIDHint))
-	fuseFD, err := RequestMount(socketPath, args, containerName, containerIDHint)
+func requestMountAndForwardFD(socketPath string, commFD int, args Args, containerName, containerIDHint, sessionID string, debugOut io.Writer, debug bool) error {
+	debugf(debugOut, debug, "fusermount3: requesting mount for %q via %s%s\n", args.Mountpoint, socketPath, formatIdentityDebug(containerName, containerIDHint, sessionID))
+	fuseFD, err := RequestMount(socketPath, args, containerName, containerIDHint, sessionID)
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func requestMountAndForwardFD(socketPath string, commFD int, args Args, containe
 	return nil
 }
 
-func RequestMount(socketPath string, args Args, containerName, containerIDHint string) (int, error) {
+func RequestMount(socketPath string, args Args, containerName, containerIDHint, sessionID string) (int, error) {
 	sidecarConn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		return -1, fmt.Errorf("connect to sidecar socket %q: %w", socketPath, err)
@@ -132,6 +132,7 @@ func RequestMount(socketPath string, args Args, containerName, containerIDHint s
 		Options:         SplitMountOptions(args.Options),
 		ContainerName:   containerName,
 		ContainerIDHint: containerIDHint,
+		SessionID:       sessionID,
 	}
 	if err := protocol.WriteJSON(sidecarConn, req); err != nil {
 		return -1, fmt.Errorf("send mount request: %w", err)
@@ -160,8 +161,8 @@ func RequestMount(socketPath string, args Args, containerName, containerIDHint s
 	return fuseFD, nil
 }
 
-func requestUnmount(socketPath string, args Args, containerName, containerIDHint string, debugOut io.Writer, debug bool) error {
-	debugf(debugOut, debug, "fusermount3: requesting unmount for %q lazy=%v via %s%s\n", args.Mountpoint, args.Lazy, socketPath, formatIdentityDebug(containerName, containerIDHint))
+func requestUnmount(socketPath string, args Args, containerName, containerIDHint, sessionID string, debugOut io.Writer, debug bool) error {
+	debugf(debugOut, debug, "fusermount3: requesting unmount for %q lazy=%v via %s%s\n", args.Mountpoint, args.Lazy, socketPath, formatIdentityDebug(containerName, containerIDHint, sessionID))
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("connect to sidecar socket %q: %w", socketPath, err)
@@ -174,6 +175,7 @@ func requestUnmount(socketPath string, args Args, containerName, containerIDHint
 		Lazy:            args.Lazy,
 		ContainerName:   containerName,
 		ContainerIDHint: containerIDHint,
+		SessionID:       sessionID,
 	}
 	if err := protocol.WriteJSON(conn, req); err != nil {
 		return fmt.Errorf("send unmount request: %w", err)
@@ -189,17 +191,22 @@ func requestUnmount(socketPath string, args Args, containerName, containerIDHint
 	return nil
 }
 
-func containerIdentityFromEnv(getenv func(string) string) (name, idHint string) {
-	return strings.TrimSpace(getenv(protocol.EnvContainerName)), strings.TrimSpace(getenv(protocol.EnvHostname))
+func containerIdentityFromEnv(getenv func(string) string) (name, idHint, sessionID string) {
+	return strings.TrimSpace(getenv(protocol.EnvContainerName)),
+		strings.TrimSpace(getenv(protocol.EnvHostname)),
+		strings.TrimSpace(getenv(protocol.EnvAgentSession))
 }
 
-func formatIdentityDebug(containerName, containerIDHint string) string {
+func formatIdentityDebug(containerName, containerIDHint, sessionID string) string {
 	var parts []string
 	if containerName != "" {
 		parts = append(parts, "container="+containerName)
 	}
 	if containerIDHint != "" {
 		parts = append(parts, "idHint="+containerIDHint)
+	}
+	if sessionID != "" {
+		parts = append(parts, "session="+sessionID)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -249,7 +256,8 @@ Environment:
   %[5]s           enable verbose helper debug logs when set to 1/true/yes
   %[6]s             optional Docker container name hint for sidecar translation
   %[7]s                    optional container id hint
-`, name, protocol.EnvSocketPath, protocol.DefaultSocketPath, protocol.EnvFuseCommFD, protocol.EnvDebug, protocol.EnvContainerName, protocol.EnvHostname)
+  %[8]s           optional CCC agent session id, logged by the sidecar for audit
+`, name, protocol.EnvSocketPath, protocol.DefaultSocketPath, protocol.EnvFuseCommFD, protocol.EnvDebug, protocol.EnvContainerName, protocol.EnvHostname, protocol.EnvAgentSession)
 }
 
 func printErr(w io.Writer, quiet bool, format string, args ...any) {
